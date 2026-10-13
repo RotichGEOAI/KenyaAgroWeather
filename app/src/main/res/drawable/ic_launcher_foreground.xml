@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- water droplet -->
+    <path
+        android:fillColor="#FFB3E5FC"
+        android:pathData="M54,26 C54,26 38,46 38,58 C38,67 45,74 54,74 C63,74 70,67 70,58 C70,46 54,26 54,26 Z" />
+    <!-- leaf -->
+    <path
+        android:fillColor="#FFA5D6A7"
+        android:pathData="M54,80 C54,80 40,76 38,62 C52,62 58,70 54,80 Z" />
+</vector>

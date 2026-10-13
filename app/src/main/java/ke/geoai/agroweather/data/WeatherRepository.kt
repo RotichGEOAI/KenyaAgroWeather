@@ -1,0 +1,92 @@
+package ke.geoai.agroweather.data
+
+import ke.geoai.agroweather.data.model.Climatology
+import ke.geoai.agroweather.data.model.Forecast
+import ke.geoai.agroweather.data.model.GeoPlace
+import ke.geoai.agroweather.data.model.OniReading
+import ke.geoai.agroweather.data.model.RadarFrames
+import ke.geoai.agroweather.data.model.SeasonalDay
+import ke.geoai.agroweather.data.net.HttpFetcher
+import ke.geoai.agroweather.data.parse.ApiUrls
+import ke.geoai.agroweather.data.parse.EnsoParser
+import ke.geoai.agroweather.data.parse.OpenMeteoParser
+import ke.geoai.agroweather.data.parse.RainViewerParser
+import java.util.concurrent.TimeUnit
+import kotlin.coroutines.cancellation.CancellationException
+
+/**
+ * Cache-first repository. Fresh cache is served without a request; when a request fails the last
+ * good response is served flagged `stale`; a response is cached only after it parses successfully.
+ */
+class WeatherRepository(
+    private val http: HttpFetcher,
+    private val cache: CacheStore,
+    private val clock: () -> Long = { System.currentTimeMillis() },
+) {
+    data class Loaded<T>(val data: T, val stale: Boolean, val fetchedAtMs: Long)
+
+    private suspend fun <T> cached(
+        key: String,
+        ttlMs: Long,
+        force: Boolean,
+        url: String,
+        normalize: (String) -> String = { it },
+        parse: (String, Long) -> T,
+    ): Loaded<T> {
+        val now = clock()
+        val hit = cache.get(key)
+        if (hit != null && !force && now - hit.fetchedAt < ttlMs) {
+            return Loaded(parse(hit.json, hit.fetchedAt), stale = false, fetchedAtMs = hit.fetchedAt)
+        }
+        return try {
+            val stored = normalize(http.get(url))
+            val parsed = parse(stored, now)           // throws on a bad body, so it is never cached
+            cache.put(CacheRecord(key, stored, now))
+            Loaded(parsed, stale = false, fetchedAtMs = now)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            if (hit != null) Loaded(parse(hit.json, hit.fetchedAt), stale = true, fetchedAtMs = hit.fetchedAt) else throw e
+        }
+    }
+
+    private fun place(lat: Double, lon: Double) = "${ApiUrls.coord(lat)},${ApiUrls.coord(lon)}"
+
+    suspend fun forecast(lat: Double, lon: Double, force: Boolean = false): Loaded<Forecast> =
+        cached("fc:${ApiUrls.fine(lat)},${ApiUrls.fine(lon)}", FORECAST_TTL, force, ApiUrls.forecast(lat, lon)) { body, at ->
+            OpenMeteoParser.parseForecast(body, at)
+        }
+
+    suspend fun seasonal(lat: Double, lon: Double, force: Boolean = false): Loaded<List<SeasonalDay>> =
+        cached("seas:${place(lat, lon)}", SEASONAL_TTL, force, ApiUrls.seasonal(lat, lon)) { body, _ ->
+            OpenMeteoParser.parseSeasonal(body)
+        }
+
+    /** 15-year ERA5 baseline, stored in compact form and refreshed monthly. */
+    suspend fun climatology(lat: Double, lon: Double): Loaded<Climatology> {
+        val label = "ERA5 ${ApiUrls.CLIMATOLOGY_START}–${ApiUrls.CLIMATOLOGY_END}"
+        return cached(
+            "clim:${place(lat, lon)}", CLIMATOLOGY_TTL, false, ApiUrls.climatology(lat, lon),
+            normalize = { OpenMeteoParser.climatologyToJson(OpenMeteoParser.parseClimatology(it, label)) },
+        ) { stored, _ -> OpenMeteoParser.climatologyFromJson(stored) }
+    }
+
+    suspend fun enso(force: Boolean = false): Loaded<List<OniReading>> =
+        cached("enso", ENSO_TTL, force, ApiUrls.ENSO_ONI) { body, _ -> EnsoParser.parse(body) }
+
+    suspend fun radar(force: Boolean = false): Loaded<RadarFrames> =
+        cached("radar", RADAR_TTL, force, ApiUrls.RAINVIEWER) { body, _ -> RainViewerParser.parse(body) }
+
+    suspend fun searchPlaces(query: String): List<GeoPlace> {
+        if (query.trim().length < 2) return emptyList()
+        return OpenMeteoParser.parseGeocoding(http.get(ApiUrls.geocode(query)))
+    }
+
+    companion object {
+        val FORECAST_TTL = TimeUnit.MINUTES.toMillis(30)
+        val SEASONAL_TTL = TimeUnit.HOURS.toMillis(12)
+        val ENSO_TTL = TimeUnit.HOURS.toMillis(12)
+        val RADAR_TTL = TimeUnit.MINUTES.toMillis(4)
+        val CLIMATOLOGY_TTL = TimeUnit.DAYS.toMillis(30)
+    }
+}

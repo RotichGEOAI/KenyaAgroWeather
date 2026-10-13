@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Kenya AgroWeather</string>
+    <string name="alerts_channel_name">Farm weather alerts</string>
+    <string name="alerts_channel_desc">Heavy rain, flood risk, strong wind, frost and irrigation reminders</string>
+</resources>
