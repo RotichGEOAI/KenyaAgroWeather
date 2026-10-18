@@ -50,7 +50,7 @@ fun AgroApp(vm: AppViewModel = viewModel()) {
         val m = Modifier.padding(padding)
         when (tab) {
             Tab.TODAY -> TodayScreen(ui, vm, m, onGo = { tab = it })
-            Tab.FORECAST -> ForecastScreen(ui, m, onGo = { tab = it })
+            Tab.FORECAST -> ForecastScreen(ui, m, onGo = { tab = it }, onLoadModels = { vm.loadModels(it) })
             Tab.RADAR -> RadarScreen(ui, vm, m)
             Tab.ENSO -> EnsoScreen(ui, vm, m)
             Tab.FARMS -> FarmsScreen(ui, vm, m)

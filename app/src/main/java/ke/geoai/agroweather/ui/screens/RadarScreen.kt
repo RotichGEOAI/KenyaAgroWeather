@@ -156,10 +156,17 @@ fun RadarScreen(ui: UiState, vm: AppViewModel, modifier: Modifier) {
             }
         }
 
+        ui.analysis?.let { a ->
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                SignalBadge(a.rainAdvice.light, a.rainAdvice.badge)
+                Text("  ${a.rainAdvice.headline}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
+            }
+        }
+
         NoteCard(
             "Radar shows where rain is falling now and the next ~30 minutes. Radar coverage is patchy over parts of " +
                 "East Africa, so a blank area can mean no radar rather than no rain. Wind and temperature come from the " +
-                "weather model, not from radar directly. Radar: RainViewer · Map: © OpenStreetMap contributors.",
+                "weather model, not from radar directly; so do cloud cover and storm energy. Radar: RainViewer · Map: © OpenStreetMap contributors.",
         )
     }
 }
@@ -307,6 +314,10 @@ private fun SpotCard(spot: SpotState, onSave: () -> Unit, onClear: () -> Unit) {
                             StatTile("Rain 24 h", "${Fmt.n1(a.hours.take(24).sumOf { it.precipMm })} mm", null, Modifier.weight(1f))
                             StatTile("Rain 7 days", "${Fmt.n0(a.outlook.rain7Mm)} mm", null, Modifier.weight(1f))
                         }
+                    }
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        SignalBadge(a.rainAdvice.light, a.rainAdvice.badge)
+                        Text("  Rain: ${a.rainAdvice.headline}", Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium)
                     }
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         SignalBadge(a.sprayAdvice.light, a.sprayAdvice.badge)

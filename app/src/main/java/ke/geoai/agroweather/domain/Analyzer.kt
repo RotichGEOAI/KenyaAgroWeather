@@ -17,6 +17,8 @@ data class OutlookStats(
     val windyDays: Int,
     val sprayHoursByDate: Map<LocalDate, Int>,
     val recentRain48hMm: Double,
+    val cloudMeanByDate: Map<LocalDate, Int>,
+    val capeMaxByDate: Map<LocalDate, Double>,
 )
 
 data class Analysis(
@@ -31,6 +33,8 @@ data class Analysis(
     val fieldAdvice: Advice,
     val alerts: List<Alert>,
     val outlook: OutlookStats,
+    val rain: List<RainRisk>,                                          // next 48 h, aligned with [hours]
+    val rainAdvice: Advice,
 )
 
 /** One pure entry point shared by the dashboard and the background alert worker. */
@@ -52,6 +56,10 @@ object Analyzer {
         val sprayAll = SprayAdvisor.assess(allHours, fc.daily)
         val spray48 = sprayAll.take(48)
         val sprayAdvice = SprayAdvisor.advise(spray48)
+
+        val rainAll = RainRiskAdvisor.assess(allHours)
+        val rain48 = rainAll.take(48)
+        val rainAdvice = RainRiskAdvisor.advise(rain48, hours48)
 
         // Soil starting point: fresh probe reading > model layers > assumption
         val modelVwc = hours48.firstOrNull()?.soilMoisture?.rootZoneMean()
@@ -77,6 +85,15 @@ object Analyzer {
             )
         }
 
+        val storm = RainRiskAdvisor.stormHours(rain48.take(24), hours48.take(24))
+        if (storm.isNotEmpty()) {
+            alerts += Alert(
+                "STORM_RISK:$today", Severity.WATCH, "Thunderstorm risk",
+                "High storm energy with building cloud ${RainRiskAdvisor.stormWindow(storm)}. The model may under-show the rain: " +
+                    "hold spraying and field work, and keep away from open fields and trees during lightning.",
+            )
+        }
+
         val d7 = days.take(7)
         val d14 = days.take(14)
         val normal = clim?.let { c -> { list: List<ke.geoai.agroweather.data.model.DayPoint> -> list.sumOf { c.dailyPrecip(it.date) } } }
@@ -92,11 +109,15 @@ object Analyzer {
             windyDays = d7.count { (it.gustMaxKmh ?: 0.0) >= 40 },
             sprayHoursByDate = sprayHours,
             recentRain48hMm = fc.recentRainMm(today),
+            cloudMeanByDate = allHours.groupBy { it.time.toLocalDate() }
+                .mapValues { (_, v) -> v.mapNotNull { it.cloudPct }.takeIf { it.isNotEmpty() }?.average()?.roundToInt() ?: 0 },
+            capeMaxByDate = allHours.groupBy { it.time.toLocalDate() }
+                .mapValues { (_, v) -> v.mapNotNull { it.capeJkg }.maxOrNull() ?: 0.0 },
         )
 
         return Analysis(
             now, hours48, spray48, sprayAdvice, plan, waterAdvice, soil, soilAdvice, fieldAdvice,
-            alerts.sortedByDescending { it.severity.ordinal }, outlook,
+            alerts.sortedByDescending { it.severity.ordinal }, outlook, rain48, rainAdvice,
         )
     }
 

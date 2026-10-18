@@ -18,9 +18,11 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -36,6 +38,9 @@ import ke.geoai.agroweather.data.model.MonthOutlook
 import ke.geoai.agroweather.domain.Analysis
 import ke.geoai.agroweather.domain.Light
 import ke.geoai.agroweather.domain.Meteo
+import ke.geoai.agroweather.domain.ModelAgreement
+import ke.geoai.agroweather.domain.RainAgreement
+import ke.geoai.agroweather.domain.RainRisk
 import ke.geoai.agroweather.domain.SprayAdvisor
 import ke.geoai.agroweather.ui.Fmt
 import ke.geoai.agroweather.ui.Tab
@@ -50,14 +55,17 @@ import ke.geoai.agroweather.ui.theme.signalColor
 import java.time.LocalDate
 
 private enum class Horizon(val label: String) {
-    HOURS("48 hours"), DAYS7("7 days"), DAYS14("14 days"), MONTHLY("Monthly")
+    HOURS("48 hours"), DAYS7("7 days"), DAYS14("14 days"), MONTHLY("Monthly"), MODELS("Models")
 }
 
 @Composable
-fun ForecastScreen(ui: UiState, modifier: Modifier, onGo: (Tab) -> Unit) {
+fun ForecastScreen(ui: UiState, modifier: Modifier, onGo: (Tab) -> Unit, onLoadModels: (Boolean) -> Unit) {
     var horizon by rememberSaveable { mutableStateOf(Horizon.HOURS) }
     val a = ui.analysis
     val farm = ui.selected
+    LaunchedEffect(horizon, farm?.id, farm?.lat, farm?.lon) {
+        if (horizon == Horizon.MODELS && farm != null) onLoadModels(false)
+    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
@@ -89,6 +97,7 @@ fun ForecastScreen(ui: UiState, modifier: Modifier, onGo: (Tab) -> Unit) {
             Horizon.DAYS7 -> if (a != null && ui.forecast != null) daysSection(ui, a, 7) else item { Loading(ui) }
             Horizon.DAYS14 -> if (a != null && ui.forecast != null) daysSection(ui, a, 14) else item { Loading(ui) }
             Horizon.MONTHLY -> monthlySection(ui, onGo)
+            Horizon.MODELS -> modelsSection(ui, onLoadModels)
         }
     }
 }
@@ -110,12 +119,12 @@ private fun androidx.compose.foundation.lazy.LazyListScope.hoursSection(a: Analy
         }
     }
     item { SectionTitle("Hour by hour") }
-    val rows = a.hours.zip(a.spray)
-    items(rows, key = { it.first.time.toString() }) { (h, s) -> HourRow(h, s) }
+    val n = minOf(a.hours.size, a.spray.size, a.rain.size)
+    items((0 until n).toList(), key = { a.hours[it].time.toString() }) { i -> HourRow(a.hours[i], a.spray[i], a.rain[i]) }
 }
 
 @Composable
-private fun HourRow(h: HourPoint, s: SprayAdvisor.Assessment) {
+private fun HourRow(h: HourPoint, s: SprayAdvisor.Assessment, r: RainRisk) {
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Row(Modifier.padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.width(78.dp)) {
@@ -131,9 +140,21 @@ private fun HourRow(h: HourPoint, s: SprayAdvisor.Assessment) {
                     style = MaterialTheme.typography.bodyMedium,
                 )
                 Text(
-                    "💨 ${Meteo.compass(h.windDirDeg)} ${Fmt.n0(h.windKmh)} km/h (g ${Fmt.n0(h.gustKmh)})",
+                    "💨 ${Meteo.compass(h.windDirDeg)} ${Fmt.n0(h.windKmh)} km/h (g ${Fmt.n0(h.gustKmh)})" +
+                        (h.cloudPct?.let { " · ☁ ${Fmt.n0(it)} %" } ?: ""),
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                when (r.agreement) {
+                    RainAgreement.MODEL_DRY_CLOUD_WET -> Text(
+                        "⚠ Cloud and storm energy favour showers (≈${r.cautiousChancePct} %)",
+                        style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold,
+                    )
+                    RainAgreement.MODEL_WET_CLOUD_CLEAR -> Text(
+                        "ℹ Sky looks unsupportive of the modelled rain",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    else -> Unit
+                }
             }
             Box(Modifier.size(10.dp).clip(CircleShape).background(signalColor(s.light)))
             Spacer(Modifier.width(6.dp))
@@ -190,11 +211,11 @@ private fun androidx.compose.foundation.lazy.LazyListScope.daysSection(ui: UiSta
     }
 
     item { SectionTitle("Day by day") }
-    items(days, key = { it.date.toString() }) { d -> DayRow(d, today, a.outlook.sprayHoursByDate[d.date]) }
+    items(days, key = { it.date.toString() }) { d -> DayRow(d, today, a.outlook.sprayHoursByDate[d.date], a.outlook.cloudMeanByDate[d.date], a.outlook.capeMaxByDate[d.date]) }
 }
 
 @Composable
-private fun DayRow(d: DayPoint, today: LocalDate, sprayHours: Int?) {
+private fun DayRow(d: DayPoint, today: LocalDate, sprayHours: Int?, cloud: Int?, cape: Double?) {
     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.padding(12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -211,6 +232,13 @@ private fun DayRow(d: DayPoint, today: LocalDate, sprayHours: Int?) {
                 )
                 d.gustMaxKmh?.let { Text("💨 gust ${Fmt.n0(it)}", style = MaterialTheme.typography.bodyMedium) }
                 d.et0Mm?.let { Text("ET₀ ${Fmt.n1(it)}", style = MaterialTheme.typography.bodyMedium) }
+            }
+            if (cloud != null) {
+                Text(
+                    "☁ Cloud ${cloud} % average" + if ((cape ?: 0.0) >= 1500.0) " · ⛈ high storm energy" else "",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(top = 2.dp),
+                )
             }
             if (sprayHours != null) {
                 Text(
@@ -293,6 +321,97 @@ private fun MonthCard(m: MonthOutlook) {
                     "Only ${m.coveredDays} days of this month are in the outlook; total is scaled to a full month.",
                     style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(top = 4.dp),
+                )
+            }
+        }
+    }
+}
+
+
+// ---- several weather models side by side -------------------------------------------------------
+
+private fun androidx.compose.foundation.lazy.LazyListScope.modelsSection(ui: UiState, onLoad: (Boolean) -> Unit) {
+    if (ui.modelsLoading && ui.models.isEmpty()) {
+        item { Text("Asking each weather model…") }
+        return
+    }
+    if (ui.models.isEmpty()) {
+        item { NoteCard("No model data yet. Check your connection and try again.") }
+        item { TextButton(onClick = { onLoad(true) }) { Text("Retry") } }
+        return
+    }
+    val today = ui.forecast?.localNow()?.toLocalDate() ?: LocalDate.now()
+    val days = ModelAgreement.daily(ui.models, today, 7)
+    val ok = ui.models.count { it.series != null }
+
+    item {
+        NoteCard(
+            "$ok of ${ui.models.size} models answered. " + ModelAgreement.headline(days) +
+                " Models are independent forecasts of the same place: where they agree you can plan with more confidence.",
+        )
+    }
+    val failed = ui.models.filter { it.series == null }
+    if (failed.isNotEmpty()) {
+        item {
+            Text(
+                "Unavailable: " + failed.joinToString { "${it.model.label} (${it.error ?: "no data"})" },
+                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+    item { SectionTitle("Daily rain (mm) by model") }
+    items(days) { d -> ModelDayCard(d, today) }
+    item {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text(
+                "Wet day = 1 mm or more. Only models covering the whole day are counted.",
+                style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.weight(1f),
+            )
+            TextButton(onClick = { onLoad(true) }) { Text("Refresh") }
+        }
+    }
+}
+
+@Composable
+private fun ModelDayCard(d: ModelAgreement.Day, today: LocalDate) {
+    val light = when (d.verdict) {
+        ModelAgreement.Verdict.DRY -> Light.GREEN
+        ModelAgreement.Verdict.WET -> Light.AMBER
+        ModelAgreement.Verdict.SPLIT -> Light.AMBER
+        ModelAgreement.Verdict.THIN -> Light.AMBER
+    }
+    Card(
+        Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+    ) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    if (d.date == today) "Today" else d.date.dayOfWeek.name.take(3).lowercase()
+                        .replaceFirstChar { it.uppercase() } + " " + d.date.dayOfMonth,
+                    style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.weight(1f),
+                )
+                SignalBadge(light, d.verdict.label)
+            }
+            d.perModel.forEach { m ->
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text(m.modelLabel, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        if (m.rainMm == null) "–" else "${Fmt.n1(m.rainMm)} mm" +
+                            (m.tMaxC?.let { " · max ${Fmt.n0(it)}°C" } ?: "") +
+                            (m.windMaxKmh?.let { " · wind ${Fmt.n0(it)} km/h" } ?: ""),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            if (d.meanMm != null && d.reporting >= 2) {
+                Text(
+                    "${d.wetCount} of ${d.reporting} models wet · range ${Fmt.n1(d.minMm ?: 0.0)}–${Fmt.n1(d.maxMm ?: 0.0)} mm · " +
+                        "average ${Fmt.n1(d.meanMm)} mm",
+                    style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
                 )
             }
         }

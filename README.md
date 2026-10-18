@@ -23,6 +23,16 @@ Kenya tailoring: place search limited to Kenya, one-tap quick picks for 17 agric
 
 The debug APK is signed with a debug key: fine for testing, not for Play Store release.
 
+## Cloud component (rain cross-check)
+Weather-model rain fields often miss small convective showers, which drive most afternoon rain in Kenya. The app now also reads
+**low / mid / high cloud cover and CAPE (storm energy)** from Open-Meteo and cross-checks the model's rain signal (`domain/RainRisk.kt`):
+- **Cloud & rain confidence** card and a 24-hour strip on Today. A "!" marks hours where cloud and storm energy favour rain that the model's rain field does not show ("CLOUD ALERT"); "ℹ" marks modelled rain under a clear-looking sky (possible over-forecast).
+- Cloud shading on the 48-hour chart, cloud % and warnings in the hourly rows, average cloud and storm-energy notes in the daily rows.
+- A "Thunderstorm risk" alert when CAPE is high (>= 1500 J/kg) and cloud is building in the next 24 h.
+- Spray advice uses the raised chance, so spraying is held when the model is dry but the sky is loaded.
+- **Safety rule:** the cloud check can only add caution. It never lowers the model's rain chance and never changes forecast millimetres (so irrigation/water balance are unaffected).
+- **Limits:** the weights are physically motivated heuristics, not fitted to Kenyan rain-gauge data. Calibrate against local gauge records (e.g. KMD stations) before relying on the percentages. Satellite cloud imagery is not included (no verified free tile source).
+
 ## Screens
 | Tab | What it gives you |
 |---|---|
@@ -50,3 +60,16 @@ The debug APK is signed with a debug key: fine for testing, not for Play Store r
 - Crop and soil parameters are FAO-56 defaults; calibrate with local data (field capacity, wilting point, Kc) before relying on volumes.
 - Open-Meteo's free tier is for non-commercial use; check their terms before commercial distribution. OSM tiles have a usage policy: use a commercial tile provider at scale.
 - Not yet verified: this project was developed in a sandbox without the Android SDK, so the Android/Compose layers have not been compiled or run. The pure-Kotlin core (models, parsers, domain, repository) is covered by 52 JVM tests. Expect to fix a few compile-time nits on first sync.
+
+
+## Comparing weather models side by side
+
+Forecast tab -> **Models**. The app asks several independent models (ECMWF IFS, GFS, ICON, UK Met Office) for the
+same pin and shows, per day, each model's rain total, max temperature and peak wind, how many models call the day wet
+(1 mm or more), the min-max spread, and a verdict: all dry / all wet / models disagree.
+
+- Each model is requested separately, so one the service rejects shows as "Unavailable" instead of breaking the rest.
+- Model ids come from Open-Meteo's example URLs (`ecmwf_ifs`, `ncep_gfs_seamless`, `dwd_icon_seamless`, `ukmo_seamless`);
+  edit `WeatherModel.DEFAULTS` to add others. The response parser accepts both `<variable>_<model>` and plain column names.
+- A model that does not cover a whole day is left out of that day rather than counted as dry.
+- This is comparison only: the Today/spray/alert logic still uses the primary forecast with the cloud cross-check.

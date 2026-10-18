@@ -13,6 +13,7 @@ import ke.geoai.agroweather.data.model.Climatology
 import ke.geoai.agroweather.data.model.FarmProfile
 import ke.geoai.agroweather.data.model.Forecast
 import ke.geoai.agroweather.data.model.GeoPlace
+import ke.geoai.agroweather.data.model.ModelResult
 import ke.geoai.agroweather.data.model.MonthOutlook
 import ke.geoai.agroweather.data.model.RadarFrames
 import ke.geoai.agroweather.data.model.SeasonalDay
@@ -62,6 +63,9 @@ data class UiState(
     val searching: Boolean = false,
     val alertsEnabled: Boolean = true,
     val spot: SpotState? = null,
+    val models: List<ModelResult> = emptyList(),
+    val modelsLoading: Boolean = false,
+    val modelsFor: Pair<Double, Double>? = null,
 )
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
@@ -73,6 +77,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private var loadJob: Job? = null
     private var searchJob: Job? = null
     private var spotJob: Job? = null
+    private var modelsJob: Job? = null
 
     init {
         viewModelScope.launch {
@@ -92,6 +97,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         _ui.update { s ->
             val base = s.copy(farms = farms, selected = sel, farmsLoaded = true)
             if (moved) base.copy(
+                models = emptyList(), modelsFor = null, modelsLoading = false,
                 loading = false, forecast = null, analysis = null, clim = null, seasonal = emptyList(),
                 months = emptyList(), error = null, seasonalError = null, stale = false, updatedAtMs = null,
             ) else base
@@ -153,6 +159,21 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
             _ui.update { it.copy(loading = false) }
+        }
+    }
+
+    /** Fetches the several-model comparison for the selected farm (on demand: it is 4 extra requests). */
+    fun loadModels(force: Boolean = false) {
+        val farm = _ui.value.selected ?: return
+        val key = farm.lat to farm.lon
+        if (!force && _ui.value.modelsFor == key && _ui.value.models.isNotEmpty()) return
+        modelsJob?.cancel()
+        modelsJob = viewModelScope.launch {
+            _ui.update { it.copy(modelsLoading = true) }
+            val r = attempt { c.repo.compareModels(farm.lat, farm.lon, force) }
+            _ui.update {
+                it.copy(models = r.getOrDefault(emptyList()), modelsFor = key.takeIf { r.isSuccess }, modelsLoading = false)
+            }
         }
     }
 

@@ -42,6 +42,9 @@ import ke.geoai.agroweather.domain.Alert
 import ke.geoai.agroweather.domain.KenyaSeason
 import ke.geoai.agroweather.domain.Light
 import ke.geoai.agroweather.domain.Meteo
+import ke.geoai.agroweather.domain.RainAgreement
+import ke.geoai.agroweather.domain.RainRisk
+import ke.geoai.agroweather.domain.RainRiskAdvisor
 import ke.geoai.agroweather.domain.Severity
 import ke.geoai.agroweather.domain.SprayAdvisor
 import ke.geoai.agroweather.ui.AppViewModel
@@ -111,6 +114,8 @@ fun TodayScreen(ui: UiState, vm: AppViewModel, modifier: Modifier, onGo: (Tab) -
         item { NowTiles(ui) }
 
         item { SectionTitle("Decisions for ${farm.name}") }
+        item { AdviceCard("☁️", "Cloud & rain confidence", a.rainAdvice) }
+        item { RainStrip(a.rain.take(24)) }
         item { AdviceCard("🧴", "Spraying", a.sprayAdvice) }
         item {
             val good = a.spray.take(24).count { it.light == Light.GREEN }
@@ -217,6 +222,61 @@ private fun NowTiles(ui: UiState) {
                 a.outlook.normal7Mm?.let { "Normal ${Fmt.n0(it)} mm" } ?: "—", Modifier.weight(1f),
             )
         }
+        val peakCape = a.hours.take(24).mapNotNull { it.capeJkg }.maxOrNull()
+        val layers = if (now.cloudLowPct != null && now.cloudMidPct != null && now.cloudHighPct != null)
+            "low ${Fmt.n0(now.cloudLowPct)} · mid ${Fmt.n0(now.cloudMidPct)} · high ${Fmt.n0(now.cloudHighPct)}" else null
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            StatTile("Cloud cover", "${Fmt.n0(now.cloudPct ?: 0.0)} %", layers, Modifier.weight(1f))
+            StatTile(
+                "Storm energy", RainRiskAdvisor.energyLabel(peakCape),
+                peakCape?.let { "CAPE ${Fmt.n0(it)} J/kg (24 h peak)" }, Modifier.weight(1f),
+            )
+        }
+    }
+}
+
+/** 24 hourly cells of rain chance. "!" marks hours where cloud and storm energy suggest rain the model does not show. */
+@Composable
+private fun RainStrip(risks: List<RainRisk>) {
+    if (risks.isEmpty()) return
+    Column {
+        Text("Rain chance by hour, next 24 h", style = MaterialTheme.typography.labelLarge)
+        Spacer(Modifier.height(6.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            risks.forEach { r ->
+                val light = when {
+                    r.cautiousChancePct >= 60 -> Light.RED
+                    r.cautiousChancePct >= 35 -> Light.AMBER
+                    else -> Light.GREEN
+                }
+                Box(
+                    Modifier.weight(1f).height(26.dp).clip(RoundedCornerShape(4.dp)).background(signalColor(light)),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        when {
+                            r.agreement == RainAgreement.MODEL_DRY_CLOUD_WET -> "!"
+                            light == Light.RED -> "☂"
+                            light == Light.AMBER -> "~"
+                            else -> "·"
+                        },
+                        fontSize = 10.sp, color = androidx.compose.ui.graphics.Color.Black,
+                    )
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(top = 2.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            listOf(0, 6, 12, 18, 23).forEach { i ->
+                risks.getOrNull(i)?.let {
+                    Text(Fmt.hm.format(it.time), style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
+        }
+        Text(
+            "☂ likely · ~ possible · ! cloud and storm energy suggest rain the model's rain field doesn't show",
+            style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 

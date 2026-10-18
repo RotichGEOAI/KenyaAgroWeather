@@ -73,6 +73,10 @@ object OpenMeteoParser {
         val s39 = h.doubles("soil_moisture_3_to_9cm")
         val s927 = h.doubles("soil_moisture_9_to_27cm")
         val st = h.doubles("soil_temperature_6cm")
+        val ccLow = h.doubles("cloud_cover_low")
+        val ccMid = h.doubles("cloud_cover_mid")
+        val ccHigh = h.doubles("cloud_cover_high")
+        val cape = h.doubles("cape")
 
         val hours = ArrayList<HourPoint>(times.size)
         for (i in times.indices) {
@@ -95,6 +99,10 @@ object OpenMeteoParser {
                 et0Mm = et.getOrNull(i),
                 soilMoisture = SoilMoistureLayers(s01.getOrNull(i), s13.getOrNull(i), s39.getOrNull(i), s927.getOrNull(i)),
                 soilTempC = st.getOrNull(i),
+                cloudLowPct = ccLow.getOrNull(i),
+                cloudMidPct = ccMid.getOrNull(i),
+                cloudHighPct = ccHigh.getOrNull(i),
+                capeJkg = cape.getOrNull(i),
             )
         }
         if (hours.isEmpty()) throw ApiException("Forecast contained no usable hours")

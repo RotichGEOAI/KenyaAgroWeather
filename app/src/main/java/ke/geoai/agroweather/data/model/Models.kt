@@ -40,6 +40,10 @@ data class HourPoint(
     val et0Mm: Double?,
     val soilMoisture: SoilMoistureLayers,
     val soilTempC: Double?,             // 6 cm
+    val cloudLowPct: Double? = null,    // cloud cover by layer (low < 3 km, mid 3-8 km, high > 8 km)
+    val cloudMidPct: Double? = null,
+    val cloudHighPct: Double? = null,
+    val capeJkg: Double? = null,        // convective available potential energy (storm fuel)
 )
 
 data class DayPoint(

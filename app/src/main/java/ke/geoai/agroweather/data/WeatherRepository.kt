@@ -7,7 +7,13 @@ import ke.geoai.agroweather.data.model.OniReading
 import ke.geoai.agroweather.data.model.RadarFrames
 import ke.geoai.agroweather.data.model.SeasonalDay
 import ke.geoai.agroweather.data.net.HttpFetcher
+import ke.geoai.agroweather.data.model.ModelResult
+import ke.geoai.agroweather.data.model.WeatherModel
 import ke.geoai.agroweather.data.parse.ApiUrls
+import ke.geoai.agroweather.data.parse.ModelParser
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import ke.geoai.agroweather.data.parse.EnsoParser
 import ke.geoai.agroweather.data.parse.OpenMeteoParser
 import ke.geoai.agroweather.data.parse.RainViewerParser
@@ -56,6 +62,27 @@ class WeatherRepository(
         cached("fc:${ApiUrls.fine(lat)},${ApiUrls.fine(lon)}", FORECAST_TTL, force, ApiUrls.forecast(lat, lon)) { body, at ->
             OpenMeteoParser.parseForecast(body, at)
         }
+
+    /** Asks each model separately (in parallel); a failure of one is reported on that model only. */
+    suspend fun compareModels(
+        lat: Double, lon: Double, force: Boolean = false, models: List<WeatherModel> = WeatherModel.DEFAULTS,
+    ): List<ModelResult> = coroutineScope {
+        models.map { m ->
+            async {
+                try {
+                    val l = cached(
+                        "mm:${m.id}:${ApiUrls.fine(lat)},${ApiUrls.fine(lon)}", FORECAST_TTL, force,
+                        ApiUrls.model(lat, lon, m.id),
+                    ) { body, _ -> ModelParser.parse(m, body) }
+                    ModelResult(m, l.data, null, l.stale)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    ModelResult(m, null, e.message ?: "Unavailable")
+                }
+            }
+        }.awaitAll()
+    }
 
     suspend fun seasonal(lat: Double, lon: Double, force: Boolean = false): Loaded<List<SeasonalDay>> =
         cached("seas:${place(lat, lon)}", SEASONAL_TTL, force, ApiUrls.seasonal(lat, lon)) { body, _ ->

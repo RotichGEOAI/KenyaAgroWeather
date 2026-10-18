@@ -147,6 +147,7 @@ fun HourlyChart(hours: List<HourPoint>, modifier: Modifier = Modifier) {
     if (hours.size < 2) return
     val line = MaterialTheme.colorScheme.primary
     val bar = Color(0xFF1E88E5)
+    val cloudShade = Color(0xFF78909C)
     val grid = MaterialTheme.colorScheme.outlineVariant
     val tMin = hours.minOf { it.tempC }
     val tMax = hours.maxOf { it.tempC }
@@ -163,6 +164,11 @@ fun HourlyChart(hours: List<HourPoint>, modifier: Modifier = Modifier) {
             val bw = w / hours.size
 
             drawLine(grid, Offset(0f, h - 1f), Offset(w, h - 1f), strokeWidth = 1f)
+            // cloud cover as grey shading behind everything else (darker = cloudier)
+            hours.forEachIndexed { i, p ->
+                val c = ((p.cloudPct ?: 0.0) / 100.0).toFloat()
+                if (c > 0.05f) drawRect(cloudShade.copy(alpha = 0.30f * c), Offset(i * bw, 0f), Size(bw, h))
+            }
             hours.forEachIndexed { i, p ->
                 val bh = (p.precipMm / maxRain * rainH).toFloat()
                 if (bh > 0.5f) {
@@ -182,6 +188,8 @@ fun HourlyChart(hours: List<HourPoint>, modifier: Modifier = Modifier) {
             Text("Rain peak ${Fmt.n1(hours.maxOf { it.precipMm })} mm/h · total ${Fmt.n1(hours.sumOf { it.precipMm })} mm",
                 style = MaterialTheme.typography.labelMedium, color = bar)
         }
+        Text("Grey shading: cloud cover (darker = cloudier)", style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }
 

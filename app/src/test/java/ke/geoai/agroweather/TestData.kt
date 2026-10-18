@@ -17,10 +17,16 @@ fun hour(
     prob: Int? = 0,
     wind: Double = 8.0,
     gust: Double = 14.0,
+    cloudLow: Double? = null,
+    cloudMid: Double? = null,
+    cloudHigh: Double? = null,
+    cape: Double? = null,
+    cloud: Double = 20.0,
 ) = HourPoint(
     time = t, tempC = temp, humidityPct = rh, dewPointC = null, precipMm = rain, precipProbPct = prob,
-    windKmh = wind, gustKmh = gust, windDirDeg = 90.0, cloudPct = 20.0, et0Mm = 0.3,
+    windKmh = wind, gustKmh = gust, windDirDeg = 90.0, cloudPct = cloud, et0Mm = 0.3,
     soilMoisture = SoilMoistureLayers(0.25, 0.25, 0.26, 0.28), soilTempC = 20.0,
+    cloudLowPct = cloudLow, cloudMidPct = cloudMid, cloudHighPct = cloudHigh, capeJkg = cape,
 )
 
 fun day(

@@ -51,11 +51,13 @@ object SprayAdvisor {
         if (h.gustKmh > 30) red += "Gusts to ${h.gustKmh.roundToInt()} km/h"
 
         val rain = lookahead.sumOf { it.precipMm }
-        val prob = lookahead.maxOf { it.precipProbPct ?: 0 }
+        val modelProb = lookahead.maxOf { it.precipProbPct ?: 0 }
+        val prob = lookahead.maxOf { RainRiskAdvisor.assess(it).cautiousChancePct }   // model chance, raised by cloud/storm energy
+        val cloudNote = if (prob > modelProb) " (cloud and storm energy)" else ""
         when {
             rain >= 0.3 -> red += "Rain within 3 h – wash-off risk"
-            prob >= 60 -> red += "Rain chance $prob % – wash-off risk"
-            prob >= 35 -> amber += "Rain chance $prob %"
+            prob >= 60 -> red += "Rain chance $prob %$cloudNote – wash-off risk"
+            prob >= 35 -> amber += "Rain chance $prob %$cloudNote"
         }
 
         when {

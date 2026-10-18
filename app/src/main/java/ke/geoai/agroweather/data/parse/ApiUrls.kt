@@ -9,6 +9,7 @@ object ApiUrls {
 
     private const val HOURLY = "temperature_2m,relative_humidity_2m,dew_point_2m,precipitation," +
         "precipitation_probability,wind_speed_10m,wind_gusts_10m,wind_direction_10m,cloud_cover," +
+        "cloud_cover_low,cloud_cover_mid,cloud_cover_high,cape," +
         "et0_fao_evapotranspiration,soil_moisture_0_to_1cm,soil_moisture_1_to_3cm," +
         "soil_moisture_3_to_9cm,soil_moisture_9_to_27cm,soil_temperature_6cm"
 
@@ -28,6 +29,12 @@ object ApiUrls {
     fun forecast(lat: Double, lon: Double) =
         "https://api.open-meteo.com/v1/forecast?latitude=${fine(lat)}&longitude=${fine(lon)}" +
             "&hourly=$HOURLY&daily=$DAILY&forecast_days=16&past_days=2&timezone=auto&wind_speed_unit=kmh"
+
+    /** One model per request, so a model id the service rejects cannot take the others down with it. */
+    fun model(lat: Double, lon: Double, modelId: String) =
+        "https://api.open-meteo.com/v1/forecast?latitude=${fine(lat)}&longitude=${fine(lon)}" +
+            "&hourly=precipitation,temperature_2m,wind_speed_10m,cloud_cover,cape" +
+            "&models=$modelId&forecast_days=7&timezone=auto&wind_speed_unit=kmh"
 
     fun seasonal(lat: Double, lon: Double) =
         "https://seasonal-api.open-meteo.com/v1/seasonal?latitude=${coord(lat)}&longitude=${coord(lon)}" +
