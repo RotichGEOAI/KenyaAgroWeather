@@ -1,6 +1,8 @@
 package ke.geoai.agroweather.ui.screens
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,6 +48,9 @@ import ke.geoai.agroweather.ui.Fmt
 import ke.geoai.agroweather.ui.Tab
 import ke.geoai.agroweather.ui.UiState
 import ke.geoai.agroweather.ui.components.HourlyChart
+import ke.geoai.agroweather.ui.components.ModelLegend
+import ke.geoai.agroweather.ui.components.ModelLinesChart
+import ke.geoai.agroweather.ui.components.ModelRainBars
 import ke.geoai.agroweather.ui.components.NoteCard
 import ke.geoai.agroweather.ui.components.RainBars
 import ke.geoai.agroweather.ui.components.SectionTitle
@@ -59,7 +64,7 @@ private enum class Horizon(val label: String) {
 }
 
 @Composable
-fun ForecastScreen(ui: UiState, modifier: Modifier, onGo: (Tab) -> Unit, onLoadModels: (Boolean) -> Unit) {
+fun ForecastScreen(ui: UiState, modifier: Modifier, onGo: (Tab) -> Unit, onLoadModels: (Boolean) -> Unit, onPirateKey: (String) -> Unit, onTahmo: (String, String) -> Unit) {
     var horizon by rememberSaveable { mutableStateOf(Horizon.HOURS) }
     val a = ui.analysis
     val farm = ui.selected
@@ -79,7 +84,10 @@ fun ForecastScreen(ui: UiState, modifier: Modifier, onGo: (Tab) -> Unit, onLoadM
             )
         }
         item {
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(
+                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
                 Horizon.values().forEach { h ->
                     FilterChip(selected = horizon == h, onClick = { horizon = h }, label = { Text(h.label) })
                 }
@@ -97,7 +105,7 @@ fun ForecastScreen(ui: UiState, modifier: Modifier, onGo: (Tab) -> Unit, onLoadM
             Horizon.DAYS7 -> if (a != null && ui.forecast != null) daysSection(ui, a, 7) else item { Loading(ui) }
             Horizon.DAYS14 -> if (a != null && ui.forecast != null) daysSection(ui, a, 14) else item { Loading(ui) }
             Horizon.MONTHLY -> monthlySection(ui, onGo)
-            Horizon.MODELS -> modelsSection(ui, onLoadModels)
+            Horizon.MODELS -> modelsSection(ui, onLoadModels, onPirateKey, onTahmo)
         }
     }
 }
@@ -330,7 +338,9 @@ private fun MonthCard(m: MonthOutlook) {
 
 // ---- several weather models side by side -------------------------------------------------------
 
-private fun androidx.compose.foundation.lazy.LazyListScope.modelsSection(ui: UiState, onLoad: (Boolean) -> Unit) {
+private fun androidx.compose.foundation.lazy.LazyListScope.modelsSection(
+    ui: UiState, onLoad: (Boolean) -> Unit, onPirateKey: (String) -> Unit, onTahmo: (String, String) -> Unit,
+) {
     if (ui.modelsLoading && ui.models.isEmpty()) {
         item { Text("Asking each weather model…") }
         return
@@ -359,8 +369,13 @@ private fun androidx.compose.foundation.lazy.LazyListScope.modelsSection(ui: UiS
             )
         }
     }
+    item { SectionTitle("Compare visually") }
+    item { ModelCharts(ui.models, days, ui.forecast?.localNow() ?: java.time.LocalDateTime.now()) }
     item { SectionTitle("Daily rain (mm) by model") }
     items(days) { d -> ModelDayCard(d, today) }
+    item { TahmoCheckCard(ui) }
+    item { TahmoKeyCard(ui.hasTahmo, onTahmo) }
+    item { PirateKeyCard(ui.hasPirateKey, onPirateKey) }
     item {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(
@@ -395,15 +410,26 @@ private fun ModelDayCard(d: ModelAgreement.Day, today: LocalDate) {
                 )
                 SignalBadge(light, d.verdict.label)
             }
-            d.perModel.forEach { m ->
+            d.perModel.forEachIndexed { mi, m ->
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text(m.modelLabel, style = MaterialTheme.typography.bodyMedium)
+                    Text(
+                        androidx.compose.ui.text.buildAnnotatedString {
+                            pushStyle(androidx.compose.ui.text.SpanStyle(color = ke.geoai.agroweather.ui.components.ModelColors.of(mi)))
+                            append("■ ")
+                            pop()
+                            append(m.modelLabel)
+                        },
+                        style = MaterialTheme.typography.bodyMedium,
+                        modifier = Modifier.padding(end = 8.dp),
+                    )
                     Text(
                         if (m.rainMm == null) "–" else "${Fmt.n1(m.rainMm)} mm" +
                             (m.tMaxC?.let { " · max ${Fmt.n0(it)}°C" } ?: "") +
                             (m.windMaxKmh?.let { " · wind ${Fmt.n0(it)} km/h" } ?: ""),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.End,
+                        modifier = Modifier.weight(1f),
                     )
                 }
             }
@@ -414,6 +440,151 @@ private fun ModelDayCard(d: ModelAgreement.Day, today: LocalDate) {
                     style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.primary,
                 )
             }
+        }
+    }
+}
+
+
+@Composable
+private fun ModelCharts(
+    results: List<ke.geoai.agroweather.data.model.ModelResult>,
+    days: List<ModelAgreement.Day>,
+    now: java.time.LocalDateTime,
+) {
+    var metric by rememberSaveable { mutableStateOf(ModelAgreement.Metric.RAIN_CUM) }
+    val ok = results.withIndex().filter { it.value.series != null }
+    val from = now.withMinute(0).withSecond(0).withNano(0)
+    val count = if (metric == ModelAgreement.Metric.RAIN_CUM) 24 * 7 else 72
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ModelAgreement.Metric.values().forEach { m ->
+                    FilterChip(selected = metric == m, onClick = { metric = m }, label = { Text(m.label) })
+                }
+            }
+            Text(
+                if (metric == ModelAgreement.Metric.RAIN_CUM) "Rain building up over the next 7 days (mm): lines that fan out are the disagreement"
+                else "${metric.label} (${metric.unit}) over the next 72 hours",
+                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            ModelLegend(ok.map { it.value.model.label }, colorIdx = ok.map { it.index })
+            ModelLinesChart(
+                ok.map { (_, r) -> ModelAgreement.hourlySeries(r.series!!.hours, metric, from, count) },
+                ok.map { it.index },
+                metric.unit,
+            )
+            Text("Rain by day, side by side", style = MaterialTheme.typography.labelLarge)
+            ModelRainBars(days, results.size)
+            ModelLegend(results.map { it.model.label })
+        }
+    }
+}
+
+@Composable
+private fun PirateKeyCard(hasKey: Boolean, onSave: (String) -> Unit) {
+    var text by rememberSaveable { mutableStateOf("") }
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Pirate Weather key", style = MaterialTheme.typography.titleSmall)
+            Text(
+                if (hasKey) "A key is saved on this phone. Enter a new one to replace it, or save an empty box to remove it."
+                else "Optional. Get a free key at pirateweather.net, subscribe to the forecast API, then paste it here.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            androidx.compose.material3.OutlinedTextField(
+                value = text, onValueChange = { text = it }, singleLine = true,
+                label = { Text("API key") },
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            TextButton(onClick = { onSave(text); text = "" }) { Text("Save and compare") }
+        }
+    }
+}
+
+
+/** Forecast vs what the nearest TAHMO ground station actually recorded. */
+@Composable
+private fun TahmoCheckCard(ui: UiState) {
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("Forecast vs ground station (TAHMO)", style = MaterialTheme.typography.titleSmall)
+            val t = ui.tahmo
+            when {
+                !ui.hasTahmo -> Text(
+                    "Add your TAHMO key and secret below to compare each model with rain recorded by the nearest station.",
+                    style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                ui.tahmoLoading && t == null -> Text("Reading the nearest station…")
+                ui.tahmoError != null -> Text(ui.tahmoError, style = MaterialTheme.typography.bodyMedium)
+                t != null -> {
+                    val now = ui.forecast?.localNow() ?: java.time.LocalDateTime.now()
+                    val today = now.toLocalDate()
+                    Text(
+                        "Station ${t.station.code}${t.station.name?.let { " ($it)" } ?: ""} · ${Fmt.n1(t.distanceKm)} km from your pin",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                    if (t.distanceKm > 25.0) {
+                        Text(
+                            "More than 25 km away: rain can differ a lot over that distance, so treat the comparison as a rough guide.",
+                            style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    listOf(
+                        "Yesterday" to (today.minusDays(1) to 24),
+                        "Today so far" to (today to now.hour),
+                    ).forEach { (label, dh) ->
+                        val (date, upto) = dh
+                        if (upto <= 0) return@forEach
+                        val obs = t.mmFor(date, upto)
+                        Text("$label: station recorded ${Fmt.n1(obs)} mm", style = MaterialTheme.typography.labelLarge)
+                        val checks = ModelAgreement.verify(ui.models, date, obs, upto)
+                        if (checks.isEmpty()) {
+                            Text("No model covers this whole period.", style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        checks.forEach { c ->
+                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                Text(c.modelLabel, style = MaterialTheme.typography.bodyMedium)
+                                Text(
+                                    "${Fmt.n1(c.forecastMm)} mm (${if (c.errorMm >= 0) "+" else ""}${Fmt.n1(c.errorMm)})",
+                                    style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                    Text(
+                        "Station rain is summed from its quality-checked records and assumed to be mm per record. A gap in the station data lowers its total.",
+                        style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TahmoKeyCard(has: Boolean, onSave: (String, String) -> Unit) {
+    var key by rememberSaveable { mutableStateOf("") }
+    var secret by rememberSaveable { mutableStateOf("") }
+    Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh)) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text("TAHMO credentials", style = MaterialTheme.typography.titleSmall)
+            Text(
+                if (has) "Saved on this phone. Enter new ones to replace them, or save both boxes empty to remove them."
+                else "From TAHMO / DKUT (dsail-info@dkut.ac.ke): the API key name and its secret/token. They are sent only to TAHMO and kept only on this phone.",
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            androidx.compose.material3.OutlinedTextField(
+                value = key, onValueChange = { key = it }, singleLine = true, label = { Text("API key name") },
+                modifier = Modifier.fillMaxWidth(),
+            )
+            androidx.compose.material3.OutlinedTextField(
+                value = secret, onValueChange = { secret = it }, singleLine = true, label = { Text("API secret / token") },
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+            )
+            TextButton(onClick = { onSave(key, secret); key = ""; secret = "" }) { Text("Save and check") }
         }
     }
 }

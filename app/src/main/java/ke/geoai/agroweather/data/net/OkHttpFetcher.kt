@@ -18,13 +18,19 @@ class OkHttpFetcher(
         .build(),
 ) : HttpFetcher {
 
-    override suspend fun get(url: String): String = withContext(Dispatchers.IO) {
+    override suspend fun get(url: String): String = fetch(url, null)
+
+    override suspend fun getBasic(url: String, user: String, password: String): String =
+        fetch(url, okhttp3.Credentials.basic(user, password))
+
+    private suspend fun fetch(url: String, authorization: String?): String = withContext(Dispatchers.IO) {
         var last: Exception? = null
         for (attempt in 0 until MAX_ATTEMPTS) {
             try {
                 val request = Request.Builder()
                     .url(url)
-                    .header("User-Agent", "AgroWeather/1.0 (Android)")
+                    .header("User-Agent", USER_AGENT)
+                    .apply { if (authorization != null) header("Authorization", authorization) }
                     .build()
                 client.newCall(request).execute().use { resp ->
                     if (resp.isSuccessful) {
@@ -45,7 +51,9 @@ class OkHttpFetcher(
         throw last ?: IOException("Network error")
     }
 
-    private companion object {
+    companion object {
         const val MAX_ATTEMPTS = 3
+        /** MET Norway blocks generic agents and asks for a unique one with contact info: put your repo URL or email here. */
+        const val USER_AGENT = "KenyaAgroWeather/1.0 (github.com/your-account/KenyaAgroWeather)"
     }
 }

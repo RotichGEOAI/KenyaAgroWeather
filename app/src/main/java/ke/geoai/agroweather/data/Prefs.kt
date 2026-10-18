@@ -14,6 +14,19 @@ class Prefs(context: Context) {
         get() = sp.getBoolean(KEY_ALERTS, true)
         set(v) = sp.edit().putBoolean(KEY_ALERTS, v).apply()
 
+    /** Optional Pirate Weather key entered by the user (stored in app-private preferences, never logged). */
+    var pirateKey: String
+        get() = sp.getString(KEY_PIRATE, "") ?: ""
+        set(v) = sp.edit().putString(KEY_PIRATE, v.trim()).apply()
+
+    /** TAHMO datahub credentials (HTTP Basic: key + secret), kept in app-private preferences and never logged. */
+    var tahmoKey: String
+        get() = sp.getString(KEY_TAHMO_K, "") ?: ""
+        set(v) = sp.edit().putString(KEY_TAHMO_K, v.trim()).apply()
+    var tahmoSecret: String
+        get() = sp.getString(KEY_TAHMO_S, "") ?: ""
+        set(v) = sp.edit().putString(KEY_TAHMO_S, v.trim()).apply()
+
     /**
      * Returns true the first time [key] is seen (caller should notify), false for repeats.
      * Entries are stored as "<epochDay>|<key>" and pruned after 7 days.
@@ -33,5 +46,8 @@ class Prefs(context: Context) {
         const val KEY_FARM = "selected_farm"
         const val KEY_ALERTS = "alerts_enabled"
         const val KEY_NOTIFIED = "notified"
+        const val KEY_PIRATE = "pirate_key"
+        const val KEY_TAHMO_K = "tahmo_key"
+        const val KEY_TAHMO_S = "tahmo_secret"
     }
 }

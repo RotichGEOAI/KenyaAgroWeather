@@ -73,3 +73,32 @@ same pin and shows, per day, each model's rain total, max temperature and peak w
   edit `WeatherModel.DEFAULTS` to add others. The response parser accepts both `<variable>_<model>` and plain column names.
 - A model that does not cover a whole day is left out of that day rather than counted as dry.
 - This is comparison only: the Today/spray/alert logic still uses the primary forecast with the cloud cross-check.
+
+
+## More sources, charts and screen sizes
+
+**Compared in the Models tab:** four Open-Meteo models (ECMWF IFS, GFS, ICON, UK Met Office), **MET Norway**
+(api.met.no, free, no key) and **Pirate Weather** (free key, entered in the app and kept only on the phone).
+Set your own contact in `OkHttpFetcher.USER_AGENT`: MET Norway rejects anonymous or generic agents.
+Charts: cumulative rain per model over 7 days (where lines fan out, models disagree), temperature / wind / cloud lines
+over 72 h, and grouped daily-rain bars. Colour-blind-safe colours plus different dash patterns.
+
+**Meteosat:** Radar tab -> satellite chips (infrared cloud, cloud-top height) from EUMETSAT's public EUMETView WMS,
+layers `msg_iodc:ir108` and `msg_iodc:cth`. Raw Meteosat files need an EUMETSAT account and heavy processing, so they are not used.
+
+**Not included:** TAHMO (needs a key and secret from DKUT and its endpoints are not publicly documented) and the FASTA
+API (documentation not public). Both are observation/nowcast sources that would slot into the same comparison once you have access.
+
+**Screen sizes:** bottom bar on phones, side rail from 600 dp wide (tablets, landscape, foldables), content centred with a
+readable maximum width, chip rows scroll sideways, the map grows on large screens, and the activity is resizable (split-screen).
+
+## TAHMO ground-station check
+
+Forecast tab -> Models -> "TAHMO credentials". Enter the API key name and secret/token you got from TAHMO / DKUT; they are
+stored only on the phone and sent only to `datahub.tahmo.org` as HTTP Basic credentials in the Authorization header
+(never in a URL, cache key or error message). The app finds the TAHMO station nearest your pin, reads its quality-checked
+rain (`pr`) for yesterday and today so far, and shows each model's forecast for the same period with the error.
+
+Built from TAHMO's own API v2 Python examples (github.com/TAHMO/API-V2-Python-examples). Unverified assumptions:
+station coordinates are read from `location.latitude/longitude` (or top-level `latitude/longitude`), and each `pr` record
+is treated as mm for its interval. Check both against your first real response.

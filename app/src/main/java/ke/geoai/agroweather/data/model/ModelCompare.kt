@@ -3,7 +3,16 @@ package ke.geoai.agroweather.data.model
 import java.time.LocalDateTime
 
 /** A weather model that can be requested from Open-Meteo. [id] is the value of the `models=` parameter. */
-data class WeatherModel(val id: String, val label: String, val provider: String) {
+enum class ModelSource { OPEN_METEO, MET_NORWAY, PIRATE_WEATHER }
+
+data class WeatherModel(
+    val id: String,
+    val label: String,
+    val provider: String,
+    val source: ModelSource = ModelSource.OPEN_METEO,
+) {
+    val needsKey: Boolean get() = source == ModelSource.PIRATE_WEATHER
+
     companion object {
         /** Identifiers taken from Open-Meteo's own example URLs; a model the service rejects is shown as unavailable. */
         val DEFAULTS = listOf(
@@ -11,6 +20,8 @@ data class WeatherModel(val id: String, val label: String, val provider: String)
             WeatherModel("ncep_gfs_seamless", "GFS", "NOAA (USA)"),
             WeatherModel("dwd_icon_seamless", "ICON", "DWD (Germany)"),
             WeatherModel("ukmo_seamless", "UK Met Office", "UKMO (UK)"),
+            WeatherModel("met_norway", "MET Norway", "MET Norway (api.met.no)", ModelSource.MET_NORWAY),
+            WeatherModel("pirate_weather", "Pirate Weather", "Pirate Weather (needs key)", ModelSource.PIRATE_WEATHER),
         )
     }
 }

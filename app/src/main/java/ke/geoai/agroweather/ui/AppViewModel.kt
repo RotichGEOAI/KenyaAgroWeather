@@ -14,6 +14,7 @@ import ke.geoai.agroweather.data.model.FarmProfile
 import ke.geoai.agroweather.data.model.Forecast
 import ke.geoai.agroweather.data.model.GeoPlace
 import ke.geoai.agroweather.data.model.ModelResult
+import ke.geoai.agroweather.data.model.TahmoRain
 import ke.geoai.agroweather.data.model.MonthOutlook
 import ke.geoai.agroweather.data.model.RadarFrames
 import ke.geoai.agroweather.data.model.SeasonalDay
@@ -66,11 +67,17 @@ data class UiState(
     val models: List<ModelResult> = emptyList(),
     val modelsLoading: Boolean = false,
     val modelsFor: Pair<Double, Double>? = null,
+    val hasPirateKey: Boolean = false,
+    val hasTahmo: Boolean = false,
+    val tahmo: TahmoRain? = null,
+    val tahmoError: String? = null,
+    val tahmoLoading: Boolean = false,
 )
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val c = (app as AgroWeatherApp).container
-    private val _ui = MutableStateFlow(UiState(alertsEnabled = c.prefs.alertsEnabled))
+    private val _ui = MutableStateFlow(UiState(alertsEnabled = c.prefs.alertsEnabled, hasPirateKey = c.prefs.pirateKey.isNotBlank(),
+            hasTahmo = c.prefs.tahmoKey.isNotBlank() && c.prefs.tahmoSecret.isNotBlank()))
     val ui: StateFlow<UiState> = _ui.asStateFlow()
 
     private var farmsCache: List<FarmProfile> = emptyList()
@@ -170,11 +177,58 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         modelsJob?.cancel()
         modelsJob = viewModelScope.launch {
             _ui.update { it.copy(modelsLoading = true) }
-            val r = attempt { c.repo.compareModels(farm.lat, farm.lon, force) }
+            launch { loadTahmo(farm.lat, farm.lon, force) }
+            val r = attempt {
+                c.repo.compareModels(
+                    farm.lat, farm.lon, force,
+                    utcOffsetSeconds = _ui.value.forecast?.utcOffsetSeconds ?: 3 * 3600,
+                    pirateKey = c.prefs.pirateKey,
+                )
+            }
             _ui.update {
                 it.copy(models = r.getOrDefault(emptyList()), modelsFor = key.takeIf { r.isSuccess }, modelsLoading = false)
             }
         }
+    }
+
+    private suspend fun loadTahmo(lat: Double, lon: Double, force: Boolean) {
+        val key = c.prefs.tahmoKey
+        val secret = c.prefs.tahmoSecret
+        if (key.isBlank() || secret.isBlank()) {
+            _ui.update { it.copy(tahmo = null, tahmoError = null, tahmoLoading = false) }
+            return
+        }
+        _ui.update { it.copy(tahmoLoading = true) }
+        attempt { c.repo.tahmoRain(lat, lon, key, secret, _ui.value.forecast?.utcOffsetSeconds ?: 3 * 3600, force) }
+            .onSuccess { l ->
+                _ui.update {
+                    it.copy(
+                        tahmo = l.data, tahmoLoading = false,
+                        tahmoError = if (l.data == null) "TAHMO returned no stations with a known position" else null,
+                    )
+                }
+            }
+            .onFailure { e ->
+                // the message never contains the credentials: they travel only in the Authorization header
+                val msg = if (e is ApiException && (e.message?.contains("401") == true || e.message?.contains("403") == true))
+                    "TAHMO rejected the key or secret" else friendly(e)
+                _ui.update { it.copy(tahmo = null, tahmoError = msg, tahmoLoading = false) }
+            }
+    }
+
+    /** Saves TAHMO credentials on this phone. Both empty removes them. */
+    fun setTahmo(key: String, secret: String) {
+        c.prefs.tahmoKey = key
+        c.prefs.tahmoSecret = secret
+        _ui.update { it.copy(hasTahmo = key.isNotBlank() && secret.isNotBlank(), tahmo = null, tahmoError = null) }
+        loadModels(force = true)
+    }
+
+    /** Saves the optional Pirate Weather key and re-queries the models. An empty string removes it. */
+    fun setPirateKey(key: String) {
+        c.prefs.pirateKey = key
+        _ui.update { it.copy(hasPirateKey = key.isNotBlank()) }
+        loadModels(force = true)
     }
 
     /** ENSO and radar do not depend on the selected farm. */
